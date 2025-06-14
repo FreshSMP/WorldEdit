@@ -52,6 +52,7 @@ import com.sk89q.worldedit.world.weather.WeatherType;
 import com.sk89q.worldedit.world.weather.WeatherTypes;
 import io.papermc.lib.PaperLib;
 import org.apache.logging.log4j.Logger;
+import org.bukkit.Bukkit;
 import org.bukkit.Effect;
 import org.bukkit.TreeType;
 import org.bukkit.World;
@@ -71,6 +72,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import javax.annotation.Nullable;
 
@@ -84,7 +86,6 @@ public class BukkitWorld extends AbstractWorld {
 
     static {
         for (Effect effect : Effect.values()) {
-            @SuppressWarnings("deprecation")
             int id = effect.getId();
             effects.put(id, effect);
         }
@@ -144,7 +145,7 @@ public class BukkitWorld extends AbstractWorld {
                     return null;
                 }
             } catch (Exception e) {
-                LOGGER.warn("Corrupt entity found when creating: " + entity.getType().id(), e);
+                LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
                 if (entity.getNbt() != null) {
                     LOGGER.warn(entity.getNbt().toString());
                 }
@@ -259,7 +260,7 @@ public class BukkitWorld extends AbstractWorld {
         treeTypeMapping.put(TreeGenerator.TreeType.RANDOM_MUSHROOM, TreeType.BROWN_MUSHROOM);
         for (TreeGenerator.TreeType type : TreeGenerator.TreeType.values()) {
             if (treeTypeMapping.get(type) == null) {
-                WorldEdit.logger.error("No TreeType mapping for TreeGenerator.TreeType." + type);
+                WorldEdit.logger.error("No TreeType mapping for TreeGenerator.TreeType.{}", type);
             }
         }
     }
@@ -454,26 +455,32 @@ public class BukkitWorld extends AbstractWorld {
         return false;
     }
 
-    private static volatile boolean hasWarnedImplError = false;
+    // Why mark something as volatile when it's not used and
+    // produces a warning? Consider it final until it's utilized.
+    private static final boolean hasWarnedImplError = false;
 
     @Override
     public com.sk89q.worldedit.world.block.BlockState getBlock(BlockVector3 position) {
-        BukkitImplAdapter adapter = WorldEditPlugin.getInstance().getBukkitImplAdapter();
-        if (adapter != null) {
-            try {
-                return adapter.getBlock(BukkitAdapter.adapt(getWorld(), position));
-            } catch (Exception e) {
-                if (!hasWarnedImplError) {
-                    hasWarnedImplError = true;
-                    LOGGER.warn("Unable to retrieve block via impl adapter", e);
-                }
-            }
+        World world = getWorld();
+        int chunkX = position.x() >> 4;
+        int chunkZ = position.z() >> 4;
+
+        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            return BukkitAdapter.adapt(block.getBlockData());
         }
-        if (WorldEditPlugin.getInstance().getLocalConfiguration().unsupportedVersionEditing) {
-            Block bukkitBlock = getWorld().getBlockAt(position.x(), position.y(), position.z());
-            return BukkitAdapter.adapt(bukkitBlock.getBlockData());
-        } else {
-            throw new RuntimeException(new UnsupportedVersionEditException());
+
+        final CompletableFuture<com.sk89q.worldedit.world.block.BlockState> future = new CompletableFuture<>();
+
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            future.complete(BukkitAdapter.adapt(block.getBlockData()));
+        });
+
+        try {
+            return future.get();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to retrieve block state asynchronously", e);
         }
     }
 
@@ -485,8 +492,7 @@ public class BukkitWorld extends AbstractWorld {
                 return worldNativeAccess.setBlock(position, block, sideEffects);
             } catch (Exception e) {
                 if (block instanceof BaseBlock baseBlock && baseBlock.getNbt() != null) {
-                    LOGGER.warn("Tried to set a corrupt tile entity at " + position.toString()
-                        + ": " + baseBlock.getNbt(), e);
+                    LOGGER.warn("Tried to set a corrupt tile entity at {}: {}", position.toString(), baseBlock.getNbt(), e);
                 } else {
                     LOGGER.warn("Failed to set block via adapter, falling back to generic", e);
                 }
@@ -503,11 +509,25 @@ public class BukkitWorld extends AbstractWorld {
 
     @Override
     public BaseBlock getFullBlock(BlockVector3 position) {
-        BukkitImplAdapter adapter = WorldEditPlugin.getInstance().getBukkitImplAdapter();
-        if (adapter != null) {
-            return adapter.getFullBlock(BukkitAdapter.adapt(getWorld(), position));
-        } else {
-            return getBlock(position).toBaseBlock();
+        final World world = getWorld();
+        final int chunkX = position.x() >> 4;
+        final int chunkZ = position.z() >> 4;
+
+        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
+        }
+
+        final CompletableFuture<BaseBlock> future = new CompletableFuture<>();
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            future.complete(BukkitAdapter.adapt(block.getBlockData()).toBaseBlock());
+        });
+
+        try {
+            return future.get();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get full block asynchronously", e);
         }
     }
 

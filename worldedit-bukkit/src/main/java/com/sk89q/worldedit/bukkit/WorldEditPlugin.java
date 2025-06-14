@@ -506,7 +506,7 @@ public class WorldEditPlugin extends JavaPlugin implements TabCompleter {
      * @return an instance of the plugin
      * @throws NullPointerException if the plugin hasn't been enabled
      */
-    static WorldEditPlugin getInstance() {
+    public static WorldEditPlugin getInstance() {
         return checkNotNull(INSTANCE);
     }
 
