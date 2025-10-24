@@ -440,7 +440,7 @@ public class UtilityCommands {
         }
 
         CreatureButcher flags = new CreatureButcher(actor);
-        flags.or(CreatureButcher.Flags.FRIENDLY, killFriendly);
+        flags.or(CreatureButcher.Flags.FRIENDLY, killFriendly); // No permission check here. Flags will instead be filtered by the subsequent calls.
         flags.or(CreatureButcher.Flags.PETS, killPets, "worldedit.butcher.pets");
         flags.or(CreatureButcher.Flags.NPCS, killNpcs, "worldedit.butcher.npcs");
         flags.or(CreatureButcher.Flags.GOLEMS, killGolems, "worldedit.butcher.golems");
