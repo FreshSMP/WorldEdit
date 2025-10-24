@@ -25,6 +25,7 @@ import com.sk89q.bukkit.util.CommandRegistration;
 import com.sk89q.worldedit.LocalConfiguration;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplAdapter;
+import com.sk89q.worldedit.bukkit.folia.FoliaScheduler;
 import com.sk89q.worldedit.command.util.PermissionCondition;
 import com.sk89q.worldedit.entity.Player;
 import com.sk89q.worldedit.extension.platform.AbstractPlatform;
@@ -38,7 +39,6 @@ import com.sk89q.worldedit.util.lifecycle.Lifecycled;
 import com.sk89q.worldedit.world.DataFixer;
 import com.sk89q.worldedit.world.registry.Registries;
 import io.papermc.lib.PaperLib;
-import io.papermc.paper.threadedregions.scheduler.ScheduledTask;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
 import org.bukkit.Registry;
@@ -122,8 +122,8 @@ public class BukkitServerInterface extends AbstractPlatform implements MultiUser
 
     @Override
     public int schedule(long delay, long period, Runnable task) {
-        ScheduledTask scheduledTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, task1 -> task.run(), Math.max(1L, delay), Math.max(1L, period));
-        return scheduledTask.getExecutionState() == ScheduledTask.ExecutionState.CANCELLED ? -1 : scheduledTask.hashCode();
+        FoliaScheduler.getGlobalRegionScheduler().runAtFixedRate(plugin, o -> task.run(), delay, period);
+        return task.hashCode();
     }
 
     @Override

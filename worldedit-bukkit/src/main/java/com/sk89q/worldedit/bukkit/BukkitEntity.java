@@ -20,6 +20,7 @@
 package com.sk89q.worldedit.bukkit;
 
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplAdapter;
+import com.sk89q.worldedit.bukkit.folia.FoliaScheduler;
 import com.sk89q.worldedit.entity.BaseEntity;
 import com.sk89q.worldedit.entity.Entity;
 import com.sk89q.worldedit.entity.Player;
@@ -76,7 +77,12 @@ class BukkitEntity implements Entity {
     public boolean setLocation(Location location) {
         org.bukkit.entity.Entity entity = entityRef.get();
         if (entity != null) {
-            entity.getScheduler().run(WorldEditPlugin.getInstance(), scheduledTask -> entity.teleportAsync(BukkitAdapter.adapt(location)), null);
+            FoliaScheduler.getEntityScheduler().run(
+                entity,
+                WorldEditPlugin.getInstance(),
+                o -> entity.teleportAsync(BukkitAdapter.adapt(location)),
+                null
+            );
             return true;
         } else {
             return false;
@@ -99,14 +105,21 @@ class BukkitEntity implements Entity {
             var loc = entity.getLocation();
             int cx = loc.getBlockX() >> 4;
             int cz = loc.getBlockZ() >> 4;
-            if (Bukkit.isOwnedByCurrentRegion(loc.getWorld(), cx, cz)) {
-                return adapter.getEntity(entity);
+            if (FoliaScheduler.isFolia()) {
+                if (Bukkit.isOwnedByCurrentRegion(loc.getWorld(), cx, cz)) {
+                    return adapter.getEntity(entity);
+                }
+            } else {
+                if (Bukkit.isPrimaryThread()) {
+                    return adapter.getEntity(entity);
+                }
             }
         } catch (Throwable ignored) {
         }
 
         try {
-            entity.getScheduler().run(
+            FoliaScheduler.getEntityScheduler().run(
+                entity,
                 WorldEditPlugin.getInstance(),
                 task -> {
                     try {
@@ -123,7 +136,7 @@ class BukkitEntity implements Entity {
     }
 
     /**
-     * Remove this entity safely, using Folia region-scheduler.
+     * Remove this entity safely, using region/main-thread scheduling as appropriate.
      *
      * @return true if removal was scheduled or completed successfully
      */
@@ -139,13 +152,18 @@ class BukkitEntity implements Entity {
             return entity.isDead();
         } catch (Throwable offThread) {
             try {
-                entity.getScheduler().run(WorldEditPlugin.getInstance(), scheduledTask -> {
-                    try {
-                        entity.remove();
-                    } catch (UnsupportedOperationException ignored) {
-                        // Some entities may refuse removal
-                    }
-                }, null);
+                FoliaScheduler.getEntityScheduler().run(
+                    entity,
+                    WorldEditPlugin.getInstance(),
+                    scheduledTask -> {
+                        try {
+                            entity.remove();
+                        } catch (UnsupportedOperationException ignored) {
+                            // Some entities may refuse removal
+                        }
+                    },
+                    null
+                );
                 return true;
             } catch (UnsupportedOperationException e) {
                 return false;
@@ -168,12 +186,17 @@ class BukkitEntity implements Entity {
 
         if (EntitySchedulerFacet.class.isAssignableFrom(cls)) {
             return (T) (EntitySchedulerFacet) task ->
-                entity.getScheduler().run(WorldEditPlugin.getInstance(), scheduledTask -> {
-                    try {
-                        task.run();
-                    } catch (Throwable ignored) {
-                    }
-                }, null);
+                FoliaScheduler.getEntityScheduler().run(
+                    entity,
+                    WorldEditPlugin.getInstance(),
+                    scheduledTask -> {
+                        try {
+                            task.run();
+                        } catch (Throwable ignored) {
+                        }
+                    },
+                    null
+                );
         }
 
         return null;

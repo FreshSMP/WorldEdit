@@ -35,6 +35,7 @@ import com.sk89q.worldedit.blocks.BaseItemStack;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplAdapter;
+import com.sk89q.worldedit.bukkit.folia.FoliaScheduler;
 import com.sk89q.worldedit.entity.BaseEntity;
 import com.sk89q.worldedit.extension.platform.Watchdog;
 import com.sk89q.worldedit.extent.Extent;
@@ -710,15 +711,7 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
 
     @Override
     public boolean regenerate(World bukkitWorld, Region region, Extent extent, RegenOptions options) {
-        boolean isFolia;
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            isFolia = true;
-        } catch (ClassNotFoundException e) {
-            isFolia = false;
-        }
-
-        if (isFolia) {
+        if (FoliaScheduler.isFolia()) {
             return regenerateFolia(bukkitWorld, region, extent, options);
         }
 
@@ -886,11 +879,11 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
                 MinecraftServer console = originalWorld.getServer();
                 CompletableFuture<Void> initFuture = new CompletableFuture<>();
 
-                Bukkit.getServer().getRegionScheduler().run(
-                    com.sk89q.worldedit.bukkit.WorldEditPlugin.getInstance(),
+                FoliaScheduler.getRegionScheduler().execute(
+                    WorldEditPlugin.getInstance(),
                     freshWorld.getWorld(),
                     spawnChunk.x, spawnChunk.z,
-                    task -> {
+                    () -> {
                         try {
                             console.initWorld(freshWorld, newWorldData, newWorldData, newWorldData.worldGenOptions());
                             initFuture.complete(null);
@@ -919,7 +912,6 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
         return true;
     }
 
-    @SuppressWarnings("unchecked")
     private void regenForWorldFolia(Region region, Extent extent, ServerLevel serverWorld, RegenOptions options) throws WorldEditException {
         List<CompletableFuture<ChunkAccess>> chunkLoadings = submitChunkLoadTasksFolia(region, serverWorld);
 
@@ -969,7 +961,7 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
             final int chunkX = chunk.x();
             final int chunkZ = chunk.z();
 
-            Bukkit.getRegionScheduler().execute(
+            FoliaScheduler.getRegionScheduler().execute(
                 WorldEditPlugin.getInstance(),
                 bukkitWorld,
                 chunkX,

@@ -30,6 +30,7 @@ import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.adapter.AdapterLoadException;
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplAdapter;
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplLoader;
+import com.sk89q.worldedit.bukkit.folia.FoliaScheduler;
 import com.sk89q.worldedit.event.platform.CommandEvent;
 import com.sk89q.worldedit.event.platform.CommandSuggestionEvent;
 import com.sk89q.worldedit.event.platform.PlatformReadyEvent;
@@ -577,7 +578,11 @@ public class WorldEditPlugin extends JavaPlugin implements TabCompleter {
     }
 
     private void cancelTasks() {
-        this.getServer().getAsyncScheduler().cancelTasks(this);
-        this.getServer().getGlobalRegionScheduler().cancelTasks(this);
+        FoliaScheduler.getAsyncScheduler().cancel(this);
+        FoliaScheduler.getGlobalRegionScheduler().cancel(this);
+
+        if (!FoliaScheduler.isFolia()) {
+            this.getServer().getScheduler().cancelTasks(this);
+        }
     }
 }

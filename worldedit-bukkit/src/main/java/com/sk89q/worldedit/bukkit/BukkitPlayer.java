@@ -23,6 +23,7 @@ import com.sk89q.util.StringUtil;
 import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.blocks.BaseItemStack;
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplAdapter;
+import com.sk89q.worldedit.bukkit.folia.FoliaScheduler;
 import com.sk89q.worldedit.entity.BaseEntity;
 import com.sk89q.worldedit.extension.platform.AbstractPlayerActor;
 import com.sk89q.worldedit.extent.inventory.BlockBag;
@@ -146,8 +147,8 @@ public class BukkitPlayer extends AbstractPlayerActor {
 
     @Override
     public boolean trySetPosition(Vector3 pos, float pitch, float yaw) {
-        player.getScheduler().run(WorldEditPlugin.getInstance(), scheduledTask -> player.teleportAsync(new Location(player.getWorld(), pos.x(), pos.y(),
-                pos.z(), yaw, pitch)), null);
+        FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
+            o -> player.teleportAsync(new Location(player.getWorld(), pos.x(), pos.y(), pos.z(), yaw, pitch)), null);
         return true;
     }
 
@@ -225,7 +226,8 @@ public class BukkitPlayer extends AbstractPlayerActor {
 
     @Override
     public boolean setLocation(com.sk89q.worldedit.util.Location location) {
-        player.getScheduler().run(WorldEditPlugin.getInstance(), scheduledTask -> player.teleportAsync(BukkitAdapter.adapt(location)), null);
+        FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
+            o -> player.teleportAsync(BukkitAdapter.adapt(location)), null);
         return true;
     }
 

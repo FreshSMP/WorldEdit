@@ -28,6 +28,7 @@ import com.sk89q.worldedit.blocks.BaseItem;
 import com.sk89q.worldedit.blocks.BaseItemStack;
 import com.sk89q.worldedit.bukkit.adapter.BukkitImplAdapter;
 import com.sk89q.worldedit.bukkit.adapter.UnsupportedVersionEditException;
+import com.sk89q.worldedit.bukkit.folia.FoliaScheduler;
 import com.sk89q.worldedit.entity.BaseEntity;
 import com.sk89q.worldedit.extent.Extent;
 import com.sk89q.worldedit.function.mask.Mask;
@@ -146,33 +147,42 @@ public class BukkitWorld extends AbstractWorld {
         final int chunkX = bLoc.getBlockX() >> 4;
         final int chunkZ = bLoc.getBlockZ() >> 4;
 
-        if (Bukkit.isOwnedByCurrentRegion(bukkitWorld, chunkX, chunkZ)) {
-            try {
-                org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
-                return created != null ? new BukkitEntity(created) : null;
-            } catch (Exception e) {
-                LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
-                if (entity.getNbt() != null) {
-                    LOGGER.warn(entity.getNbt().toString());
+        try {
+            if (FoliaScheduler.isFolia()) {
+                if (Bukkit.isOwnedByCurrentRegion(bukkitWorld, chunkX, chunkZ)) {
+                    org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
+                    return created != null ? new BukkitEntity(created) : null;
                 }
-                return null;
+            } else {
+                if (Bukkit.isPrimaryThread()) {
+                    org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
+                    return created != null ? new BukkitEntity(created) : null;
+                }
             }
+        } catch (Exception e) {
+            LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
+            if (entity.getNbt() != null) {
+                LOGGER.warn(entity.getNbt().toString());
+            }
+            return null;
         }
 
         final CompletableFuture<org.bukkit.entity.Entity> future = new CompletableFuture<>();
 
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), bukkitWorld, chunkX, chunkZ, () -> {
-            try {
-                org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
-                future.complete(created);
-            } catch (Exception e) {
-                LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
-                if (entity.getNbt() != null) {
-                    LOGGER.warn(entity.getNbt().toString());
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), bukkitWorld, chunkX, chunkZ,
+            () -> {
+                try {
+                    org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
+                    future.complete(created);
+                } catch (Exception e) {
+                    LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
+                    if (entity.getNbt() != null) {
+                        LOGGER.warn(entity.getNbt().toString());
+                    }
+                    future.complete(null);
                 }
-                future.complete(null);
             }
-        }
         );
 
         try {
@@ -330,7 +340,10 @@ public class BukkitWorld extends AbstractWorld {
         final int chunkX = loc.getBlockX() >> 4;
         final int chunkZ = loc.getBlockZ() >> 4;
 
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> world.dropItemNaturally(loc, BukkitAdapter.adapt(item)));
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
+            () -> world.dropItemNaturally(loc, BukkitAdapter.adapt(item))
+        );
     }
 
     @Override
@@ -339,21 +352,30 @@ public class BukkitWorld extends AbstractWorld {
         final int chunkX = pt.x() >> 4;
         final int chunkZ = pt.z() >> 4;
 
-        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-            world.getChunkAtAsync(chunkX, chunkZ);
-            return;
+        if (FoliaScheduler.isFolia()) {
+            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+                world.getChunkAtAsync(chunkX, chunkZ);
+                return;
+            }
+        } else {
+            if (Bukkit.isPrimaryThread()) {
+                world.getChunkAtAsync(chunkX, chunkZ);
+                return;
+            }
         }
 
         final CompletableFuture<Void> future = new CompletableFuture<>();
 
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
-            try {
-                world.getChunkAtAsync(chunkX, chunkZ);
-                future.complete(null);
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
+            () -> {
+                try {
+                    world.getChunkAtAsync(chunkX, chunkZ);
+                    future.complete(null);
+                } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
             }
-        }
         );
 
         try {
@@ -520,17 +542,27 @@ public class BukkitWorld extends AbstractWorld {
         int chunkX = position.x() >> 4;
         int chunkZ = position.z() >> 4;
 
-        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-            Block block = world.getBlockAt(position.x(), position.y(), position.z());
-            return BukkitAdapter.adapt(block.getBlockData());
+        if (FoliaScheduler.isFolia()) {
+            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+                Block block = world.getBlockAt(position.x(), position.y(), position.z());
+                return BukkitAdapter.adapt(block.getBlockData());
+            }
+        } else {
+            if (Bukkit.isPrimaryThread()) {
+                Block block = world.getBlockAt(position.x(), position.y(), position.z());
+                return BukkitAdapter.adapt(block.getBlockData());
+            }
         }
 
         final CompletableFuture<com.sk89q.worldedit.world.block.BlockState> future = new CompletableFuture<>();
 
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
-            Block block = world.getBlockAt(position.x(), position.y(), position.z());
-            future.complete(BukkitAdapter.adapt(block.getBlockData()));
-        });
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
+            () -> {
+                Block block = world.getBlockAt(position.x(), position.y(), position.z());
+                future.complete(BukkitAdapter.adapt(block.getBlockData()));
+            }
+        );
 
         try {
             return future.get();
@@ -546,18 +578,25 @@ public class BukkitWorld extends AbstractWorld {
         final int chunkX = position.x() >> 4;
         final int chunkZ = position.z() >> 4;
 
-        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-            return doSetBlock(world, position, block, sideEffects);
+        if (FoliaScheduler.isFolia()) {
+            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+                return doSetBlock(world, position, block, sideEffects);
+            }
+        } else {
+            if (Bukkit.isPrimaryThread()) {
+                return doSetBlock(world, position, block, sideEffects);
+            }
         }
 
         CompletableFuture<Boolean> result = new CompletableFuture<>();
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
-            try {
-                result.complete(doSetBlock(world, position, block, sideEffects));
-            } catch (Throwable t) {
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+                try {
+                    result.complete(doSetBlock(world, position, block, sideEffects));
+                } catch (Throwable t) {
                     result.completeExceptionally(t);
+                }
             }
-        }
         );
 
         try {
@@ -598,16 +637,26 @@ public class BukkitWorld extends AbstractWorld {
         final int chunkX = position.x() >> 4;
         final int chunkZ = position.z() >> 4;
 
-        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-            Block block = world.getBlockAt(position.x(), position.y(), position.z());
-            return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
+        if (FoliaScheduler.isFolia()) {
+            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+                Block block = world.getBlockAt(position.x(), position.y(), position.z());
+                return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
+            }
+        } else {
+            if (Bukkit.isPrimaryThread()) {
+                Block block = world.getBlockAt(position.x(), position.y(), position.z());
+                return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
+            }
         }
 
         final CompletableFuture<BaseBlock> future = new CompletableFuture<>();
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
-            Block block = world.getBlockAt(position.x(), position.y(), position.z());
-            future.complete(BukkitAdapter.adapt(block.getBlockData()).toBaseBlock());
-        });
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
+            () -> {
+                Block block = world.getBlockAt(position.x(), position.y(), position.z());
+                future.complete(BukkitAdapter.adapt(block.getBlockData()).toBaseBlock());
+            }
+        );
 
         try {
             return future.get();
@@ -624,18 +673,26 @@ public class BukkitWorld extends AbstractWorld {
         final int chunkX = position.x() >> 4;
         final int chunkZ = position.z() >> 4;
 
-        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-            return doApplySideEffects(position, previousType, sideEffectSet);
+        if (FoliaScheduler.isFolia()) {
+            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+                return doApplySideEffects(position, previousType, sideEffectSet);
+            }
+        } else {
+            if (Bukkit.isPrimaryThread()) {
+                return doApplySideEffects(position, previousType, sideEffectSet);
+            }
         }
 
         CompletableFuture<Set<SideEffect>> future = new CompletableFuture<>();
-        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
-            try {
-                future.complete(doApplySideEffects(position, previousType, sideEffectSet));
-            } catch (Throwable t) {
-                future.completeExceptionally(t);
+        FoliaScheduler.getRegionScheduler().execute(
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
+            () -> {
+                try {
+                    future.complete(doApplySideEffects(position, previousType, sideEffectSet));
+                } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
             }
-        }
         );
 
         try {
