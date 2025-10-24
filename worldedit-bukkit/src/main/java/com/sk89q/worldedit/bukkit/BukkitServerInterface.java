@@ -122,7 +122,7 @@ public class BukkitServerInterface extends AbstractPlatform implements MultiUser
 
     @Override
     public int schedule(long delay, long period, Runnable task) {
-        ScheduledTask scheduledTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, task1 -> task.run(), java.lang.Math.max(1L, delay), java.lang.Math.max(1L, period));
+        ScheduledTask scheduledTask = Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, task1 -> task.run(), Math.max(1L, delay), Math.max(1L, period));
         return scheduledTask.getExecutionState() == ScheduledTask.ExecutionState.CANCELLED ? -1 : scheduledTask.hashCode();
     }
 

@@ -54,6 +54,7 @@ import io.papermc.lib.PaperLib;
 import org.apache.logging.log4j.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.Effect;
+import org.bukkit.Location;
 import org.bukkit.TreeType;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -135,15 +136,20 @@ public class BukkitWorld extends AbstractWorld {
     @Nullable
     @Override
     public com.sk89q.worldedit.entity.Entity createEntity(com.sk89q.worldedit.util.Location location, BaseEntity entity) {
-        BukkitImplAdapter adapter = WorldEditPlugin.getInstance().getBukkitImplAdapter();
-        if (adapter != null) {
+        final BukkitImplAdapter adapter = WorldEditPlugin.getInstance().getBukkitImplAdapter();
+        if (adapter == null) {
+            return null;
+        }
+
+        final World bukkitWorld = getWorld();
+        final Location bLoc = BukkitAdapter.adapt(bukkitWorld, location);
+        final int chunkX = bLoc.getBlockX() >> 4;
+        final int chunkZ = bLoc.getBlockZ() >> 4;
+
+        if (Bukkit.isOwnedByCurrentRegion(bukkitWorld, chunkX, chunkZ)) {
             try {
-                Entity createdEntity = adapter.createEntity(BukkitAdapter.adapt(getWorld(), location), entity);
-                if (createdEntity != null) {
-                    return new BukkitEntity(createdEntity);
-                } else {
-                    return null;
-                }
+                org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
+                return created != null ? new BukkitEntity(created) : null;
             } catch (Exception e) {
                 LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
                 if (entity.getNbt() != null) {
@@ -151,8 +157,29 @@ public class BukkitWorld extends AbstractWorld {
                 }
                 return null;
             }
-        } else {
-            return null;
+        }
+
+        final CompletableFuture<org.bukkit.entity.Entity> future = new CompletableFuture<>();
+
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), bukkitWorld, chunkX, chunkZ, () -> {
+            try {
+                org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
+                future.complete(created);
+            } catch (Exception e) {
+                LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
+                if (entity.getNbt() != null) {
+                    LOGGER.warn(entity.getNbt().toString());
+                }
+                future.complete(null);
+            }
+        }
+        );
+
+        try {
+            org.bukkit.entity.Entity created = future.get();
+            return created != null ? new BukkitEntity(created) : null;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create entity safely at " + bLoc, e);
         }
     }
 
@@ -298,14 +325,42 @@ public class BukkitWorld extends AbstractWorld {
     @Override
     public void dropItem(Vector3 pt, BaseItemStack item) {
         World world = getWorld();
-        world.dropItemNaturally(BukkitAdapter.adapt(world, pt), BukkitAdapter.adapt(item));
+        Location loc = BukkitAdapter.adapt(world, pt);
+
+        final int chunkX = loc.getBlockX() >> 4;
+        final int chunkZ = loc.getBlockZ() >> 4;
+
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> world.dropItemNaturally(loc, BukkitAdapter.adapt(item)));
     }
 
     @Override
     public void checkLoadedChunk(BlockVector3 pt) {
         World world = getWorld();
+        final int chunkX = pt.x() >> 4;
+        final int chunkZ = pt.z() >> 4;
 
-        world.getChunkAt(pt.x() >> 4, pt.z() >> 4);
+        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+            world.getChunkAtAsync(chunkX, chunkZ);
+            return;
+        }
+
+        final CompletableFuture<Void> future = new CompletableFuture<>();
+
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+            try {
+                world.getChunkAtAsync(chunkX, chunkZ);
+                future.complete(null);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        }
+        );
+
+        try {
+            future.get();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to ensure chunk [" + chunkX + "," + chunkZ + "] is loaded safely", e);
+        }
     }
 
     @Override
@@ -487,6 +542,35 @@ public class BukkitWorld extends AbstractWorld {
     @Override
     public <B extends BlockStateHolder<B>> boolean setBlock(BlockVector3 position, B block, SideEffectSet sideEffects) {
         clearContainerBlockContents(position);
+        World world = getWorld();
+        final int chunkX = position.x() >> 4;
+        final int chunkZ = position.z() >> 4;
+
+        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+            return doSetBlock(world, position, block, sideEffects);
+        }
+
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+            try {
+                result.complete(doSetBlock(world, position, block, sideEffects));
+            } catch (Throwable t) {
+                    result.completeExceptionally(t);
+            }
+        }
+        );
+
+        try {
+            return result.get();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to set block safely at " + position, e);
+        }
+    }
+
+    /**
+     * Internal helper to perform the actual block mutation.
+     */
+    private <B extends BlockStateHolder<B>> boolean doSetBlock(World world, BlockVector3 position, B block, SideEffectSet sideEffects) {
         if (worldNativeAccess != null) {
             try {
                 return worldNativeAccess.setBlock(position, block, sideEffects);
@@ -498,8 +582,9 @@ public class BukkitWorld extends AbstractWorld {
                 }
             }
         }
+
         if (WorldEditPlugin.getInstance().getLocalConfiguration().unsupportedVersionEditing) {
-            Block bukkitBlock = getWorld().getBlockAt(position.x(), position.y(), position.z());
+            Block bukkitBlock = world.getBlockAt(position.x(), position.y(), position.z());
             bukkitBlock.setBlockData(BukkitAdapter.adapt(block), sideEffects.doesApplyAny());
             return true;
         } else {
@@ -532,8 +617,37 @@ public class BukkitWorld extends AbstractWorld {
     }
 
     @Override
-    public Set<SideEffect> applySideEffects(BlockVector3 position, com.sk89q.worldedit.world.block.BlockState previousType,
-            SideEffectSet sideEffectSet) {
+    public Set<SideEffect> applySideEffects(BlockVector3 position,
+                                            com.sk89q.worldedit.world.block.BlockState previousType,
+                                            SideEffectSet sideEffectSet) {
+        World world = getWorld();
+        final int chunkX = position.x() >> 4;
+        final int chunkZ = position.z() >> 4;
+
+        if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
+            return doApplySideEffects(position, previousType, sideEffectSet);
+        }
+
+        CompletableFuture<Set<SideEffect>> future = new CompletableFuture<>();
+        Bukkit.getRegionScheduler().execute(WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+            try {
+                future.complete(doApplySideEffects(position, previousType, sideEffectSet));
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        }
+        );
+
+        try {
+            return future.get();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to apply side effects safely", e);
+        }
+    }
+
+    private Set<SideEffect> doApplySideEffects(BlockVector3 position,
+                                               com.sk89q.worldedit.world.block.BlockState previousType,
+                                               SideEffectSet sideEffectSet) {
         if (worldNativeAccess != null) {
             worldNativeAccess.applySideEffects(position, previousType, sideEffectSet);
             return Sets.intersection(
