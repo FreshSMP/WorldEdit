@@ -110,9 +110,7 @@ class BukkitEntity implements Entity {
                     return adapter.getEntity(entity);
                 }
             } else {
-                if (Bukkit.isPrimaryThread()) {
-                    return adapter.getEntity(entity);
-                }
+                return adapter.getEntity(entity);
             }
         } catch (Throwable ignored) {
         }

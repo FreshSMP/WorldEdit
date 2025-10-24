@@ -154,10 +154,8 @@ public class BukkitWorld extends AbstractWorld {
                     return created != null ? new BukkitEntity(created) : null;
                 }
             } else {
-                if (Bukkit.isPrimaryThread()) {
-                    org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
-                    return created != null ? new BukkitEntity(created) : null;
-                }
+                org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
+                return created != null ? new BukkitEntity(created) : null;
             }
         } catch (Exception e) {
             LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
@@ -358,10 +356,8 @@ public class BukkitWorld extends AbstractWorld {
                 return;
             }
         } else {
-            if (Bukkit.isPrimaryThread()) {
-                world.getChunkAtAsync(chunkX, chunkZ);
-                return;
-            }
+            world.getChunkAtAsync(chunkX, chunkZ);
+            return;
         }
 
         final CompletableFuture<Void> future = new CompletableFuture<>();
@@ -548,10 +544,8 @@ public class BukkitWorld extends AbstractWorld {
                 return BukkitAdapter.adapt(block.getBlockData());
             }
         } else {
-            if (Bukkit.isPrimaryThread()) {
-                Block block = world.getBlockAt(position.x(), position.y(), position.z());
-                return BukkitAdapter.adapt(block.getBlockData());
-            }
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            return BukkitAdapter.adapt(block.getBlockData());
         }
 
         final CompletableFuture<com.sk89q.worldedit.world.block.BlockState> future = new CompletableFuture<>();
@@ -583,9 +577,7 @@ public class BukkitWorld extends AbstractWorld {
                 return doSetBlock(world, position, block, sideEffects);
             }
         } else {
-            if (Bukkit.isPrimaryThread()) {
-                return doSetBlock(world, position, block, sideEffects);
-            }
+            return doSetBlock(world, position, block, sideEffects);
         }
 
         CompletableFuture<Boolean> result = new CompletableFuture<>();
@@ -643,10 +635,8 @@ public class BukkitWorld extends AbstractWorld {
                 return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
             }
         } else {
-            if (Bukkit.isPrimaryThread()) {
-                Block block = world.getBlockAt(position.x(), position.y(), position.z());
-                return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
-            }
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
         }
 
         final CompletableFuture<BaseBlock> future = new CompletableFuture<>();
@@ -678,9 +668,7 @@ public class BukkitWorld extends AbstractWorld {
                 return doApplySideEffects(position, previousType, sideEffectSet);
             }
         } else {
-            if (Bukkit.isPrimaryThread()) {
-                return doApplySideEffects(position, previousType, sideEffectSet);
-            }
+            return doApplySideEffects(position, previousType, sideEffectSet);
         }
 
         CompletableFuture<Set<SideEffect>> future = new CompletableFuture<>();
