@@ -879,11 +879,11 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
                 MinecraftServer console = originalWorld.getServer();
                 CompletableFuture<Void> initFuture = new CompletableFuture<>();
 
-                FoliaScheduler.getRegionScheduler().execute(
+                FoliaScheduler.getRegionScheduler().run(
                     WorldEditPlugin.getInstance(),
                     freshWorld.getWorld(),
                     spawnChunk.x, spawnChunk.z,
-                    () -> {
+                    o -> {
                         try {
                             console.initWorld(freshWorld, newWorldData, newWorldData, newWorldData.worldGenOptions());
                             initFuture.complete(null);
