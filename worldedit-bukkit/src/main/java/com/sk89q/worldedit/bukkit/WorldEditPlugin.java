@@ -578,10 +578,10 @@ public class WorldEditPlugin extends JavaPlugin implements TabCompleter {
     }
 
     private void cancelTasks() {
-        FoliaScheduler.getAsyncScheduler().cancel(this);
-        FoliaScheduler.getGlobalRegionScheduler().cancel(this);
-
-        if (!FoliaScheduler.isFolia()) {
+        if (FoliaScheduler.isFolia()) {
+            FoliaScheduler.getAsyncScheduler().cancel(this);
+            FoliaScheduler.getGlobalRegionScheduler().cancel(this);
+        } else {
             this.getServer().getScheduler().cancelTasks(this);
         }
     }
