@@ -85,4 +85,17 @@ public class TaskWrapper {
             scheduledTask.cancel();
         }
     }
+
+    /**
+     * Gets the task ID for this task.
+     *
+     * @return the task ID
+     */
+    public int getTaskId() {
+        if (bukkitTask != null) {
+            return bukkitTask.getTaskId();
+        } else {
+            return scheduledTask.hashCode();
+        }
+    }
 }

@@ -144,50 +144,23 @@ public class BukkitWorld extends AbstractWorld {
 
         final World bukkitWorld = getWorld();
         final Location bLoc = BukkitAdapter.adapt(bukkitWorld, location);
-        final int chunkX = bLoc.getBlockX() >> 4;
-        final int chunkZ = bLoc.getBlockZ() >> 4;
+        final BlockVector3 position = BukkitAdapter.asBlockVector(bLoc);
 
         try {
-            if (FoliaScheduler.isFolia()) {
-                if (Bukkit.isOwnedByCurrentRegion(bukkitWorld, chunkX, chunkZ)) {
-                    org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
-                    return created != null ? new BukkitEntity(created) : null;
-                }
-            } else {
-                org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
-                return created != null ? new BukkitEntity(created) : null;
-            }
-        } catch (Exception e) {
-            LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
-            if (entity.getNbt() != null) {
-                LOGGER.warn(entity.getNbt().toString());
-            }
-            return null;
-        }
-
-        final CompletableFuture<org.bukkit.entity.Entity> future = new CompletableFuture<>();
-
-        FoliaScheduler.getRegionScheduler().execute(
-            WorldEditPlugin.getInstance(), bukkitWorld, chunkX, chunkZ,
-            () -> {
+            return executeOnRegion(position, () -> {
                 try {
                     org.bukkit.entity.Entity created = adapter.createEntity(bLoc, entity);
-                    future.complete(created);
+                    return created != null ? new BukkitEntity(created) : null;
                 } catch (Exception e) {
                     LOGGER.warn("Corrupt entity found when creating: {}", entity.getType().id(), e);
                     if (entity.getNbt() != null) {
                         LOGGER.warn(entity.getNbt().toString());
                     }
-                    future.complete(null);
+                    return null;
                 }
-            }
-        );
-
-        try {
-            org.bukkit.entity.Entity created = future.get();
-            return created != null ? new BukkitEntity(created) : null;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create entity safely at " + bLoc, e);
+            }, "Failed to create entity safely at " + bLoc);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -347,38 +320,11 @@ public class BukkitWorld extends AbstractWorld {
     @Override
     public void checkLoadedChunk(BlockVector3 pt) {
         World world = getWorld();
-        final int chunkX = pt.x() >> 4;
-        final int chunkZ = pt.z() >> 4;
-
-        if (FoliaScheduler.isFolia()) {
-            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-                world.getChunkAtAsync(chunkX, chunkZ);
-                return;
-            }
-        } else {
+        executeOnRegionVoid(pt, () -> {
+            int chunkX = pt.x() >> 4;
+            int chunkZ = pt.z() >> 4;
             world.getChunkAtAsync(chunkX, chunkZ);
-            return;
-        }
-
-        final CompletableFuture<Void> future = new CompletableFuture<>();
-
-        FoliaScheduler.getRegionScheduler().execute(
-            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
-            () -> {
-                try {
-                    world.getChunkAtAsync(chunkX, chunkZ);
-                    future.complete(null);
-                } catch (Throwable t) {
-                    future.completeExceptionally(t);
-                }
-            }
-        );
-
-        try {
-            future.get();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to ensure chunk [" + chunkX + "," + chunkZ + "] is loaded safely", e);
-        }
+        }, "Failed to ensure chunk [" + (pt.x() >> 4) + "," + (pt.z() >> 4) + "] is loaded safely");
     }
 
     @Override
@@ -534,67 +480,103 @@ public class BukkitWorld extends AbstractWorld {
 
     @Override
     public com.sk89q.worldedit.world.block.BlockState getBlock(BlockVector3 position) {
+        return executeOnRegion(position, () -> {
+            World world = getWorld();
+            Block block = world.getBlockAt(position.x(), position.y(), position.z());
+            return BukkitAdapter.adapt(block.getBlockData());
+        }, "Failed to retrieve block state asynchronously");
+    }
+
+    @Override
+    public <B extends BlockStateHolder<B>> boolean setBlock(BlockVector3 position, B block, SideEffectSet sideEffects) {
+        clearContainerBlockContents(position);
+        return executeOnRegion(position, () -> {
+            World world = getWorld();
+            return doSetBlock(world, position, block, sideEffects);
+        }, "Failed to set block safely at " + position);
+    }
+
+    /**
+     * Executes a task on the appropriate region thread for the given position.
+     * If already on the correct thread (Folia) or not using Folia, executes immediately.
+     *
+     * @param position the position to determine the region
+     * @param task the task to execute
+     * @param errorMessage the error message to use if execution fails
+     * @return the result of the task
+     */
+    private <T> T executeOnRegion(BlockVector3 position, java.util.function.Supplier<T> task, String errorMessage) {
         World world = getWorld();
         int chunkX = position.x() >> 4;
         int chunkZ = position.z() >> 4;
 
         if (FoliaScheduler.isFolia()) {
             if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-                Block block = world.getBlockAt(position.x(), position.y(), position.z());
-                return BukkitAdapter.adapt(block.getBlockData());
+                return task.get();
             }
         } else {
-            Block block = world.getBlockAt(position.x(), position.y(), position.z());
-            return BukkitAdapter.adapt(block.getBlockData());
+            return task.get();
         }
 
-        final CompletableFuture<com.sk89q.worldedit.world.block.BlockState> future = new CompletableFuture<>();
-
+        CompletableFuture<T> future = new CompletableFuture<>();
         FoliaScheduler.getRegionScheduler().execute(
             WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
             () -> {
-                Block block = world.getBlockAt(position.x(), position.y(), position.z());
-                future.complete(BukkitAdapter.adapt(block.getBlockData()));
+                try {
+                    future.complete(task.get());
+                } catch (Throwable t) {
+                    future.completeExceptionally(t);
+                }
             }
         );
 
         try {
             return future.get();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to retrieve block state asynchronously", e);
+            throw new RuntimeException(errorMessage, e);
         }
     }
 
-    @Override
-    public <B extends BlockStateHolder<B>> boolean setBlock(BlockVector3 position, B block, SideEffectSet sideEffects) {
-        clearContainerBlockContents(position);
+    /**
+     * Executes a void task on the appropriate region thread for the given position.
+     * If already on the correct thread (Folia) or not using Folia, executes immediately.
+     *
+     * @param position the position to determine the region
+     * @param task the task to execute
+     * @param errorMessage the error message to use if execution fails
+     */
+    private void executeOnRegionVoid(BlockVector3 position, Runnable task, String errorMessage) {
         World world = getWorld();
-        final int chunkX = position.x() >> 4;
-        final int chunkZ = position.z() >> 4;
+        int chunkX = position.x() >> 4;
+        int chunkZ = position.z() >> 4;
 
         if (FoliaScheduler.isFolia()) {
             if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-                return doSetBlock(world, position, block, sideEffects);
+                task.run();
+                return;
             }
         } else {
-            return doSetBlock(world, position, block, sideEffects);
+            task.run();
+            return;
         }
 
-        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        CompletableFuture<Void> future = new CompletableFuture<>();
         FoliaScheduler.getRegionScheduler().execute(
-            WorldEditPlugin.getInstance(), world, chunkX, chunkZ, () -> {
+            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
+            () -> {
                 try {
-                    result.complete(doSetBlock(world, position, block, sideEffects));
+                    task.run();
+                    future.complete(null);
                 } catch (Throwable t) {
-                    result.completeExceptionally(t);
+                    future.completeExceptionally(t);
                 }
             }
         );
 
         try {
-            return result.get();
+            future.get();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to set block safely at " + position, e);
+            throw new RuntimeException(errorMessage, e);
         }
     }
 
@@ -625,69 +607,19 @@ public class BukkitWorld extends AbstractWorld {
 
     @Override
     public BaseBlock getFullBlock(BlockVector3 position) {
-        final World world = getWorld();
-        final int chunkX = position.x() >> 4;
-        final int chunkZ = position.z() >> 4;
-
-        if (FoliaScheduler.isFolia()) {
-            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-                Block block = world.getBlockAt(position.x(), position.y(), position.z());
-                return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
-            }
-        } else {
+        return executeOnRegion(position, () -> {
+            World world = getWorld();
             Block block = world.getBlockAt(position.x(), position.y(), position.z());
             return BukkitAdapter.adapt(block.getBlockData()).toBaseBlock();
-        }
-
-        final CompletableFuture<BaseBlock> future = new CompletableFuture<>();
-        FoliaScheduler.getRegionScheduler().execute(
-            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
-            () -> {
-                Block block = world.getBlockAt(position.x(), position.y(), position.z());
-                future.complete(BukkitAdapter.adapt(block.getBlockData()).toBaseBlock());
-            }
-        );
-
-        try {
-            return future.get();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to get full block asynchronously", e);
-        }
+        }, "Failed to get full block asynchronously");
     }
 
     @Override
     public Set<SideEffect> applySideEffects(BlockVector3 position,
                                             com.sk89q.worldedit.world.block.BlockState previousType,
                                             SideEffectSet sideEffectSet) {
-        World world = getWorld();
-        final int chunkX = position.x() >> 4;
-        final int chunkZ = position.z() >> 4;
-
-        if (FoliaScheduler.isFolia()) {
-            if (Bukkit.isOwnedByCurrentRegion(world, chunkX, chunkZ)) {
-                return doApplySideEffects(position, previousType, sideEffectSet);
-            }
-        } else {
-            return doApplySideEffects(position, previousType, sideEffectSet);
-        }
-
-        CompletableFuture<Set<SideEffect>> future = new CompletableFuture<>();
-        FoliaScheduler.getRegionScheduler().execute(
-            WorldEditPlugin.getInstance(), world, chunkX, chunkZ,
-            () -> {
-                try {
-                    future.complete(doApplySideEffects(position, previousType, sideEffectSet));
-                } catch (Throwable t) {
-                    future.completeExceptionally(t);
-                }
-            }
-        );
-
-        try {
-            return future.get();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to apply side effects safely", e);
-        }
+        return executeOnRegion(position, () -> doApplySideEffects(position, previousType, sideEffectSet),
+            "Failed to apply side effects safely");
     }
 
     private Set<SideEffect> doApplySideEffects(BlockVector3 position,

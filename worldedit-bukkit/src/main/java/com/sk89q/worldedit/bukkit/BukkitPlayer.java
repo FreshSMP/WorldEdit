@@ -147,9 +147,13 @@ public class BukkitPlayer extends AbstractPlayerActor {
 
     @Override
     public boolean trySetPosition(Vector3 pos, float pitch, float yaw) {
-        FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
-            o -> player.teleportAsync(new Location(player.getWorld(), pos.x(), pos.y(), pos.z(), yaw, pitch)), null);
-        return true;
+        if (FoliaScheduler.isFolia()) {
+            FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
+                o -> player.teleportAsync(new Location(player.getWorld(), pos.x(), pos.y(), pos.z(), yaw, pitch)), null);
+            return true;
+        }
+        return player.teleport(new Location(player.getWorld(), pos.x(), pos.y(),
+            pos.z(), yaw, pitch));
     }
 
     @Override
@@ -226,9 +230,12 @@ public class BukkitPlayer extends AbstractPlayerActor {
 
     @Override
     public boolean setLocation(com.sk89q.worldedit.util.Location location) {
-        FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
-            o -> player.teleportAsync(BukkitAdapter.adapt(location)), null);
-        return true;
+        if (FoliaScheduler.isFolia()) {
+            FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
+                o -> player.teleportAsync(BukkitAdapter.adapt(location)), null);
+            return true;
+        }
+        return player.teleport(BukkitAdapter.adapt(location));
     }
 
     @SuppressWarnings("deprecation") // Paper's deprecation, we need to support Spigot still

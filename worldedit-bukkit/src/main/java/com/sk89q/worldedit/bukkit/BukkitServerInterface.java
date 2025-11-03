@@ -122,8 +122,7 @@ public class BukkitServerInterface extends AbstractPlatform implements MultiUser
 
     @Override
     public int schedule(long delay, long period, Runnable task) {
-        FoliaScheduler.getGlobalRegionScheduler().runAtFixedRate(plugin, o -> task.run(), delay, period);
-        return task.hashCode();
+        return FoliaScheduler.getGlobalRegionScheduler().runAtFixedRate(plugin, o -> task.run(), delay, period).getTaskId();
     }
 
     @Override
