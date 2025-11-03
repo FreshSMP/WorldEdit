@@ -32,6 +32,7 @@ import com.sk89q.worldedit.world.NullWorld;
 import org.bukkit.Bukkit;
 
 import java.lang.ref.WeakReference;
+import java.util.concurrent.CompletableFuture;
 import javax.annotation.Nullable;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -115,22 +116,29 @@ class BukkitEntity implements Entity {
         } catch (Throwable ignored) {
         }
 
+        CompletableFuture<BaseEntity> future = new CompletableFuture<>();
         try {
             FoliaScheduler.getEntityScheduler().run(
                 entity,
                 WorldEditPlugin.getInstance(),
                 task -> {
                     try {
-                        adapter.getEntity(entity);
-                    } catch (Throwable ignored2) {
+                        BaseEntity result = adapter.getEntity(entity);
+                        future.complete(result);
+                    } catch (Throwable t) {
+                        future.completeExceptionally(t);
                     }
                 },
                 null
             );
+            try {
+                return future.get();
+            } catch (Exception e) {
+                return null;
+            }
         } catch (Throwable ignored) {
+            return null;
         }
-
-        return null;
     }
 
     /**
