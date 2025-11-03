@@ -710,18 +710,25 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
 
     @Override
     public boolean regenerate(World bukkitWorld, Region region, Extent extent, RegenOptions options) {
+        if (FoliaScheduler.isFolia()) {
+            return regenerateFolia(bukkitWorld, region, extent, options);
+        }
+
         try {
-            if (FoliaScheduler.isFolia()) {
-                doRegenFolia(bukkitWorld, region, extent, options);
-            } else {
-                doRegen(bukkitWorld, region, extent, options);
-            }
+            doRegen(bukkitWorld, region, extent, options);
         } catch (Exception e) {
-            throw new IllegalStateException(
-                FoliaScheduler.isFolia() ? "Regen failed on Folia." : "Regen failed.", e);
+            throw new IllegalStateException("Regen failed.", e);
         }
 
         return true;
+    }
+
+    private boolean regenerateFolia(World bukkitWorld, Region region, Extent extent, RegenOptions options) {
+        try {
+            return doRegenFolia(bukkitWorld, region, extent, options);
+        } catch (Exception e) {
+            throw new IllegalStateException("Regen failed on Folia.", e);
+        }
     }
 
     private void doRegen(World bukkitWorld, Region region, Extent extent, RegenOptions options) throws Exception {
@@ -732,19 +739,71 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
         LevelStorageSource levelStorage = LevelStorageSource.createDefault(tempDir);
         ResourceKey<LevelStem> worldDimKey = getWorldDimKey(env);
         try (LevelStorageSource.LevelStorageAccess session = levelStorage.createAccess("worldeditregentempworld", worldDimKey)) {
-            ServerLevel freshWorld = createFreshWorld(bukkitWorld, session, options);
+            ServerLevel originalWorld = ((CraftWorld) bukkitWorld).getHandle();
+            PrimaryLevelData levelProperties = (PrimaryLevelData) originalWorld.getServer()
+                .getWorldData().overworldData();
+            WorldOptions originalOpts = levelProperties.worldGenOptions();
+
+            long seed = options.getSeed().orElse(originalWorld.getSeed());
+            WorldOptions newOpts = options.getSeed().isPresent()
+                ? originalOpts.withSeed(OptionalLong.of(seed))
+                : originalOpts;
+
+            LevelSettings newWorldSettings = new LevelSettings(
+                "worldeditregentempworld",
+                levelProperties.settings.gameType(),
+                levelProperties.settings.hardcore(),
+                levelProperties.settings.difficulty(),
+                levelProperties.settings.allowCommands(),
+                levelProperties.settings.gameRules(),
+                levelProperties.settings.getDataConfiguration()
+            );
+
+            @SuppressWarnings("deprecation")
+            PrimaryLevelData.SpecialWorldProperty specialWorldProperty =
+                levelProperties.isFlatWorld()
+                    ? PrimaryLevelData.SpecialWorldProperty.FLAT
+                    : levelProperties.isDebugWorld()
+                    ? PrimaryLevelData.SpecialWorldProperty.DEBUG
+                    : PrimaryLevelData.SpecialWorldProperty.NONE;
+
+            PrimaryLevelData newWorldData = new PrimaryLevelData(newWorldSettings, newOpts, specialWorldProperty, Lifecycle.stable());
+
+            ServerLevel freshWorld = new ServerLevel(
+                originalWorld.getServer(),
+                originalWorld.getServer().executor,
+                session, newWorldData,
+                originalWorld.dimension(),
+                new LevelStem(
+                    originalWorld.dimensionTypeRegistration(),
+                    originalWorld.getChunkSource().getGenerator()
+                ),
+                originalWorld.isDebug(),
+                seed,
+                ImmutableList.of(),
+                false,
+                originalWorld.getRandomSequences(),
+                env,
+                gen,
+                bukkitWorld.getBiomeProvider()
+            );
             try {
                 regenForWorld(region, extent, freshWorld, options);
             } finally {
                 freshWorld.getChunkSource().close(false);
             }
         } finally {
-            cleanupTempWorld();
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, World> map = (Map<String, World>) serverWorldsField.get(Bukkit.getServer());
+                map.remove("worldeditregentempworld");
+            } catch (IllegalAccessException ignored) {
+            }
             SafeFiles.tryHardToDeleteDir(tempDir);
         }
     }
 
-    private void doRegenFolia(World bukkitWorld, Region region, Extent extent, RegenOptions options) throws Exception {
+    private boolean doRegenFolia(World bukkitWorld, Region region, Extent extent, RegenOptions options) throws Exception {
         Environment env = bukkitWorld.getEnvironment();
         ChunkGenerator gen = bukkitWorld.getGenerator();
 
@@ -752,111 +811,102 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
         LevelStorageSource levelStorage = LevelStorageSource.createDefault(tempDir);
         ResourceKey<LevelStem> worldDimKey = getWorldDimKey(env);
         try (LevelStorageSource.LevelStorageAccess session = levelStorage.createAccess("worldeditregentempworld", worldDimKey)) {
-            ServerLevel freshWorld = createFreshWorld(bukkitWorld, session, options);
+            ServerLevel originalWorld = ((CraftWorld) bukkitWorld).getHandle();
+            PrimaryLevelData levelProperties = (PrimaryLevelData) originalWorld.getServer()
+                .getWorldData().overworldData();
+            WorldOptions originalOpts = levelProperties.worldGenOptions();
+
+            long seed = options.getSeed().orElse(originalWorld.getSeed());
+            WorldOptions newOpts = options.getSeed().isPresent()
+                ? originalOpts.withSeed(OptionalLong.of(seed))
+                : originalOpts;
+
+            LevelSettings newWorldSettings = new LevelSettings(
+                "worldeditregentempworld",
+                levelProperties.settings.gameType(),
+                levelProperties.settings.hardcore(),
+                levelProperties.settings.difficulty(),
+                levelProperties.settings.allowCommands(),
+                levelProperties.settings.gameRules(),
+                levelProperties.settings.getDataConfiguration()
+            );
+
+            @SuppressWarnings("deprecation")
+            PrimaryLevelData.SpecialWorldProperty specialWorldProperty =
+                levelProperties.isFlatWorld()
+                    ? PrimaryLevelData.SpecialWorldProperty.FLAT
+                    : levelProperties.isDebugWorld()
+                    ? PrimaryLevelData.SpecialWorldProperty.DEBUG
+                    : PrimaryLevelData.SpecialWorldProperty.NONE;
+
+            PrimaryLevelData newWorldData = new PrimaryLevelData(newWorldSettings, newOpts, specialWorldProperty, Lifecycle.stable());
+
+            ServerLevel freshWorld = new ServerLevel(
+                originalWorld.getServer(),
+                originalWorld.getServer().executor,
+                session, newWorldData,
+                originalWorld.dimension(),
+                new LevelStem(
+                    originalWorld.dimensionTypeRegistration(),
+                    originalWorld.getChunkSource().getGenerator()
+                ),
+                originalWorld.isDebug(),
+                seed,
+                ImmutableList.of(),
+                false,
+                originalWorld.getRandomSequences(),
+                env,
+                gen,
+                bukkitWorld.getBiomeProvider()
+            );
+
             try {
-                initializeWorldFolia(freshWorld, options);
+                ChunkPos spawnChunk = new ChunkPos(
+                    freshWorld.getChunkSource().randomState().sampler().findSpawnPosition()
+                );
+
+                try {
+                    Field randomSpawnField = ServerLevel.class.getDeclaredField("randomSpawnSelection");
+                    randomSpawnField.setAccessible(true);
+                    randomSpawnField.set(freshWorld, spawnChunk);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException("Failed to set spawn chunk for Folia", e);
+                }
+
+                MinecraftServer console = originalWorld.getServer();
+                CompletableFuture<Void> initFuture = new CompletableFuture<>();
+
+                FoliaScheduler.getRegionScheduler().run(
+                    WorldEditPlugin.getInstance(),
+                    freshWorld.getWorld(),
+                    spawnChunk.x, spawnChunk.z,
+                    o -> {
+                        try {
+                            console.initWorld(freshWorld, newWorldData, newWorldData.worldGenOptions());
+                            initFuture.complete(null);
+                        } catch (Exception e) {
+                            initFuture.completeExceptionally(e);
+                        }
+                    }
+                );
+
+                initFuture.get();
+
                 regenForWorldFolia(region, extent, freshWorld, options);
             } finally {
                 freshWorld.getChunkSource().close(false);
             }
         } finally {
-            cleanupTempWorld();
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, World> map = (Map<String, World>) serverWorldsField.get(Bukkit.getServer());
+                map.remove("worldeditregentempworld");
+            } catch (IllegalAccessException ignored) {
+            }
             SafeFiles.tryHardToDeleteDir(tempDir);
         }
-    }
 
-    private ServerLevel createFreshWorld(World bukkitWorld, LevelStorageSource.LevelStorageAccess session, RegenOptions options) {
-        ServerLevel originalWorld = ((CraftWorld) bukkitWorld).getHandle();
-        PrimaryLevelData levelProperties = (PrimaryLevelData) originalWorld.getServer()
-            .getWorldData().overworldData();
-        WorldOptions originalOpts = levelProperties.worldGenOptions();
-
-        long seed = options.getSeed().orElse(originalWorld.getSeed());
-        WorldOptions newOpts = options.getSeed().isPresent()
-            ? originalOpts.withSeed(OptionalLong.of(seed))
-            : originalOpts;
-
-        LevelSettings newWorldSettings = new LevelSettings(
-            "worldeditregentempworld",
-            levelProperties.settings.gameType(),
-            levelProperties.settings.hardcore(),
-            levelProperties.settings.difficulty(),
-            levelProperties.settings.allowCommands(),
-            levelProperties.settings.gameRules(),
-            levelProperties.settings.getDataConfiguration()
-        );
-
-        @SuppressWarnings("deprecation")
-        PrimaryLevelData.SpecialWorldProperty specialWorldProperty =
-            levelProperties.isFlatWorld()
-                ? PrimaryLevelData.SpecialWorldProperty.FLAT
-                : levelProperties.isDebugWorld()
-                ? PrimaryLevelData.SpecialWorldProperty.DEBUG
-                : PrimaryLevelData.SpecialWorldProperty.NONE;
-
-        PrimaryLevelData newWorldData = new PrimaryLevelData(newWorldSettings, newOpts, specialWorldProperty, Lifecycle.stable());
-
-        return new ServerLevel(
-            originalWorld.getServer(),
-            originalWorld.getServer().executor,
-            session, newWorldData,
-            originalWorld.dimension(),
-            new LevelStem(
-                originalWorld.dimensionTypeRegistration(),
-                originalWorld.getChunkSource().getGenerator()
-            ),
-            originalWorld.isDebug(),
-            seed,
-            ImmutableList.of(),
-            false,
-            originalWorld.getRandomSequences(),
-            bukkitWorld.getEnvironment(),
-            bukkitWorld.getGenerator(),
-            bukkitWorld.getBiomeProvider()
-        );
-    }
-
-    private void initializeWorldFolia(ServerLevel freshWorld, RegenOptions options) throws Exception {
-        ChunkPos spawnChunk = new ChunkPos(
-            freshWorld.getChunkSource().randomState().sampler().findSpawnPosition()
-        );
-
-        try {
-            Field randomSpawnField = ServerLevel.class.getDeclaredField("randomSpawnSelection");
-            randomSpawnField.setAccessible(true);
-            randomSpawnField.set(freshWorld, spawnChunk);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException("Failed to set spawn chunk for Folia", e);
-        }
-
-        MinecraftServer console = freshWorld.getServer();
-        PrimaryLevelData newWorldData = (PrimaryLevelData) freshWorld.getServer().getWorldData().overworldData();
-        CompletableFuture<Void> initFuture = new CompletableFuture<>();
-
-        FoliaScheduler.getRegionScheduler().run(
-            WorldEditPlugin.getInstance(),
-            freshWorld.getWorld(),
-            spawnChunk.x, spawnChunk.z,
-            o -> {
-                try {
-                    console.initWorld(freshWorld, newWorldData, newWorldData.worldGenOptions());
-                    initFuture.complete(null);
-                } catch (Exception e) {
-                    initFuture.completeExceptionally(e);
-                }
-            }
-        );
-
-        initFuture.get();
-    }
-
-    private void cleanupTempWorld() {
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, World> map = (Map<String, World>) serverWorldsField.get(Bukkit.getServer());
-            map.remove("worldeditregentempworld");
-        } catch (IllegalAccessException ignored) {
-        }
+        return true;
     }
 
     @SuppressWarnings("unchecked")
