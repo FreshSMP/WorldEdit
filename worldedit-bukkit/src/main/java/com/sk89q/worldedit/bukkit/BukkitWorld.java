@@ -474,8 +474,6 @@ public class BukkitWorld extends AbstractWorld {
         return false;
     }
 
-    // Why mark something as volatile when it's not used and
-    // produces a warning? Consider it final until it's utilized.
     private static final boolean hasWarnedImplError = false;
 
     @Override

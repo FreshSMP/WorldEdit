@@ -46,6 +46,7 @@ import com.sk89q.worldedit.world.block.BlockStateHolder;
 import com.sk89q.worldedit.world.block.BlockTypes;
 import com.sk89q.worldedit.world.gamemode.GameMode;
 import com.sk89q.worldedit.world.gamemode.GameModes;
+import io.papermc.lib.PaperLib;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -147,7 +148,7 @@ public class BukkitPlayer extends AbstractPlayerActor {
 
     @Override
     public boolean trySetPosition(Vector3 pos, float pitch, float yaw) {
-        if (FoliaScheduler.isFolia()) {
+        if (PaperLib.isPaper()) {
             FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
                 o -> player.teleportAsync(new Location(player.getWorld(), pos.x(), pos.y(), pos.z(), yaw, pitch)), null);
             return true;
@@ -230,7 +231,7 @@ public class BukkitPlayer extends AbstractPlayerActor {
 
     @Override
     public boolean setLocation(com.sk89q.worldedit.util.Location location) {
-        if (FoliaScheduler.isFolia()) {
+        if (PaperLib.isPaper()) {
             FoliaScheduler.getEntityScheduler().run(player, WorldEditPlugin.getInstance(),
                 o -> player.teleportAsync(BukkitAdapter.adapt(location)), null);
             return true;

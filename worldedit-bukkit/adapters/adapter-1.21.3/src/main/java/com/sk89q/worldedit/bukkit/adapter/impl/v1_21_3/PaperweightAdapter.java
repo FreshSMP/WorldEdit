@@ -28,6 +28,7 @@ import com.google.common.collect.Sets;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.Lifecycle;
 import com.sk89q.worldedit.EditSession;
+import com.sk89q.worldedit.MaxChangedBlocksException;
 import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.blocks.BaseItem;
 import com.sk89q.worldedit.blocks.BaseItemStack;
@@ -903,36 +904,91 @@ public final class PaperweightAdapter implements BukkitImplAdapter {
 
     @SuppressWarnings("unchecked")
     private void regenForWorldFolia(Region region, Extent extent, ServerLevel serverWorld, RegenOptions options) throws WorldEditException {
-        List<CompletableFuture<ChunkAccess>> chunkLoadings = submitChunkLoadTasksFolia(region, serverWorld);
-
-        CompletableFuture.allOf(chunkLoadings.toArray(new CompletableFuture<?>[0])).join();
-
-        Map<ChunkPos, ChunkAccess> chunks = new HashMap<>();
-        for (CompletableFuture<ChunkAccess> future : chunkLoadings) {
-            @Nullable
-            ChunkAccess chunk = future.getNow(null);
-            checkState(chunk != null, "Failed to generate a chunk, regen failed.");
-            chunks.put(chunk.getPos(), chunk);
-        }
+        Map<BlockVector3, BlockStateHolder<?>> blockStates = new HashMap<>();
+        Map<BlockVector3, BiomeType> biomes = new HashMap<>();
+        Map<ChunkPos, List<BlockVector3>> blocksByChunk = new HashMap<>();
 
         for (BlockVector3 vec : region) {
-            BlockPos pos = new BlockPos(vec.x(), vec.y(), vec.z());
-            ChunkAccess chunk = chunks.get(new ChunkPos(pos));
-            final net.minecraft.world.level.block.state.BlockState blockData = chunk.getBlockState(pos);
-            int internalId = Block.getId(blockData);
-            BlockStateHolder<?> state = BlockStateIdAccess.getBlockStateById(internalId);
-            Objects.requireNonNull(state);
-            BlockEntity blockEntity = chunk.getBlockEntity(pos);
-            if (blockEntity != null) {
-                net.minecraft.nbt.CompoundTag tag = blockEntity.saveWithId(serverWorld.registryAccess());
-                state = state.toBaseBlock(LazyReference.from(() -> (LinCompoundTag) toNative(tag)));
-            }
-            extent.setBlock(vec, state.toBaseBlock());
-            if (options.shouldRegenBiomes()) {
-                Biome origBiome = chunk.getNoiseBiome(vec.x(), vec.y(), vec.z()).value();
-                BiomeType adaptedBiome = adapt(serverWorld, origBiome);
-                if (adaptedBiome != null) {
-                    extent.setBiome(vec, adaptedBiome);
+            ChunkPos chunkPos = new ChunkPos(vec.x() >> 4, vec.z() >> 4);
+            blocksByChunk.computeIfAbsent(chunkPos, k -> new ArrayList<>()).add(vec);
+        }
+
+        World bukkitWorld = serverWorld.getWorld();
+        List<CompletableFuture<Void>> extractionFutures = new ArrayList<>();
+
+        for (Map.Entry<ChunkPos, List<BlockVector3>> entry : blocksByChunk.entrySet()) {
+            ChunkPos chunkPos = entry.getKey();
+            List<BlockVector3> blocks = entry.getValue();
+            CompletableFuture<Void> future = new CompletableFuture<>();
+
+            FoliaScheduler.getRegionScheduler().execute(
+                    WorldEditPlugin.getInstance(),
+                    bukkitWorld,
+                    chunkPos.x,
+                    chunkPos.z,
+                    () -> {
+                        try {
+                            ServerChunkCache chunkManager = serverWorld.getChunkSource();
+                            CompletableFuture<ChunkResult<ChunkAccess>> chunkFuture =
+                                    ((CompletableFuture<ChunkResult<ChunkAccess>>)
+                                            getChunkFutureMethod.invoke(chunkManager, chunkPos.x, chunkPos.z, ChunkStatus.FEATURES, true));
+                            chunkFuture.thenApply(either -> either.orElse(null))
+                                    .whenComplete((chunkAccess, throwable) -> {
+                                        if (throwable != null) {
+                                            future.completeExceptionally(new IllegalStateException("Couldn't load chunk for regen.", throwable));
+                                        } else if (chunkAccess != null) {
+                                            try {
+                                                for (BlockVector3 vec : blocks) {
+                                                    BlockPos pos = new BlockPos(vec.x(), vec.y(), vec.z());
+                                                    final net.minecraft.world.level.block.state.BlockState blockData = chunkAccess.getBlockState(pos);
+                                                    int internalId = Block.getId(blockData);
+                                                    BlockStateHolder<?> state = BlockStateIdAccess.getBlockStateById(internalId);
+                                                    Objects.requireNonNull(state);
+                                                    BlockEntity blockEntity = chunkAccess.getBlockEntity(pos);
+                                                    if (blockEntity != null) {
+                                                        net.minecraft.nbt.CompoundTag tag = blockEntity.saveWithId(serverWorld.registryAccess());
+                                                        state = state.toBaseBlock(LazyReference.from(() -> (LinCompoundTag) toNative(tag)));
+                                                    }
+                                                    synchronized (blockStates) {
+                                                        blockStates.put(vec, state);
+                                                    }
+                                                    if (options.shouldRegenBiomes()) {
+                                                        Biome origBiome = chunkAccess.getNoiseBiome(vec.x(), vec.y(), vec.z()).value();
+                                                        BiomeType adaptedBiome = adapt(serverWorld, origBiome);
+                                                        if (adaptedBiome != null) {
+                                                            synchronized (biomes) {
+                                                                biomes.put(vec, adaptedBiome);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                future.complete(null);
+                                            } catch (Exception e) {
+                                                future.completeExceptionally(e);
+                                            }
+                                        } else {
+                                            future.completeExceptionally(new IllegalStateException("Failed to generate a chunk, regen failed."));
+                                        }
+                                    });
+                        } catch (IllegalAccessException | InvocationTargetException e) {
+                            future.completeExceptionally(new IllegalStateException("Couldn't load chunk for regen.", e));
+                        }
+                    }
+            );
+            extractionFutures.add(future);
+        }
+
+        CompletableFuture.allOf(extractionFutures.toArray(new CompletableFuture<?>[0])).join();
+
+        for (BlockVector3 vec : region) {
+            BlockStateHolder<?> state = blockStates.get(vec);
+            if (state != null) {
+                extent.setBlock(vec, state.toBaseBlock());
+                if (options.shouldRegenBiomes()) {
+                    BiomeType biome = biomes.get(vec);
+                    if (biome != null) {
+                        extent.setBiome(vec, biome);
+                    }
                 }
             }
         }

@@ -29,6 +29,7 @@ import com.sk89q.worldedit.entity.metadata.EntitySchedulerFacet;
 import com.sk89q.worldedit.extent.Extent;
 import com.sk89q.worldedit.util.Location;
 import com.sk89q.worldedit.world.NullWorld;
+import io.papermc.lib.PaperLib;
 import org.bukkit.Bukkit;
 
 import java.lang.ref.WeakReference;
@@ -77,7 +78,10 @@ class BukkitEntity implements Entity {
     @Override
     public boolean setLocation(Location location) {
         org.bukkit.entity.Entity entity = entityRef.get();
-        if (entity != null) {
+        if (entity == null) {
+          return false;
+        }
+        if (PaperLib.isPaper()) {
             FoliaScheduler.getEntityScheduler().run(
                 entity,
                 WorldEditPlugin.getInstance(),
@@ -85,9 +89,8 @@ class BukkitEntity implements Entity {
                 null
             );
             return true;
-        } else {
-            return false;
         }
+        return entity.teleport(BukkitAdapter.adapt(location));
     }
 
     @Override
